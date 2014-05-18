@@ -3,6 +3,10 @@
  */
 
 var xhr = require('xhr');
+var EventSource = require('./eventsource');
+var XHRPolling = require('./xhrpolling');
+var utils = require('./utils');
+var status = utils.status;
 
 /**
  * Expose Bullet
@@ -11,18 +15,11 @@ var xhr = require('xhr');
 module.exports = Bullet;
 
 /**
- * States
+ * Defaults
  */
-
-var CONNECTING = 0;
-var OPEN = 1;
-var CLOSING = 2;
-var CLOSED = 3;
 
 var DELAY_DEFAULT = 80;
 var DELAY_MAX = 10000;
-
-function noop() {}
 
 var TRANSPORTS = [
   'websocket',
@@ -47,24 +44,61 @@ function Bullet(url, opts) {
   this.init();
 }
 
-handlers(Bullet.prototype);
+/**
+ * Noops
+ */
+
+utils.handlers(Bullet.prototype);
 Bullet.prototype.onheartbeat = noop;
 Bullet.prototype.ondisconnect = noop;
+function noop() {}
+
+/**
+ * Set the connection url
+ *
+ * The connection will automatically be reloaded
+ *
+ * @param {String} url
+ * @return {Bullet}
+ * @api public
+ */
 
 Bullet.prototype.setURL = function(url) {
   this.url = url;
+  if (this.transport) this.transport.close();
   return this;
 };
+
+/**
+ * Send data over the socket
+ *
+ * @param {String} data
+ * @api public
+ */
 
 Bullet.prototype.send = function(data) {
   if (!this.transport) return false;
   return this.transport.send(data);
 };
 
+/**
+ * Close the socket connection
+ *
+ * @return {Bullet}
+ * @api public
+ */
+
 Bullet.prototype.close = function() {
-  this.readyState = CLOSING;
+  this.readyState = status.CLOSING;
   if (this.transport) this.transport.close();
+  return this;
 };
+
+/**
+ * Initialize the connection
+ *
+ * @api private
+ */
 
 Bullet.prototype.init = function() {
   var self = this;
@@ -83,21 +117,21 @@ Bullet.prototype.init = function() {
 
   t.onopen = function() {
     if (t.heart) self.heartbeat = setInterval(function() {self.onheartbeat();}, 20000);
-    if (self.readyState === OPEN) return;
+    if (self.readyState === status.OPEN) return;
     self.delay = DELAY_DEFAULT;
-    self.readyState = OPEN;
+    self.readyState = status.OPEN;
     self.onopen();
   };
 
   t.onerror = t.onclose = function() {
-    if (self.readyState === CLOSED || !t) return;
+    if (self.readyState === status.CLOSED || !t) return;
     var prev = t.__cursor;
     delete self.transport;
     t = null;
     clearInterval(self.heartbeat);
 
-    if (self.readyState === CLOSING) {
-      self.readyState = CLOSED;
+    if (self.readyState === status.CLOSING) {
+      self.readyState = status.CLOSED;
       return self.onclose();
     }
 
@@ -105,7 +139,7 @@ Bullet.prototype.init = function() {
     if (delay > DELAY_MAX) delay = self.delay = DELAY_MAX;
 
     // try the next transport - this one disconnected while connecting
-    if (self.readyState === CONNECTING) {
+    if (self.readyState === status.CONNECTING) {
       self.cursor = prev + 1;
       delay = self.delay = DELAY_DEFAULT;
     }
@@ -117,144 +151,6 @@ Bullet.prototype.init = function() {
     self.onmessage(e);
   };
 };
-
-/**
- * Make EventSource look like WebSocket
- *
- * @param {String} url
- */
-
-function EventSourceWS(url) {
-  var self = this;
-
-  self.url = toHttp(url);
-
-  var source = self.source = new EventSource(self.url);
-
-  source.onopen = function() {
-    self.readyState = OPEN;
-    self.onopen();
-  };
-
-  source.onmessage = function(event) {
-    self.onmessage(event);
-  };
-
-  source.onerror = function() {
-    source.close();
-    self.onerror();
-  };
-}
-
-EventSourceWS.prototype.send = xhrSend;
-handlers(XHRPollingWS.prototype);
-
-EventSourceWS.prototype.close = function() {
-  var self = this;
-  self.readyState = CLOSED;
-  self.source.close();
-  delete self.source;
-  self.onclose();
-  return self;
-};
-
-/**
- * Make XHRPolling look like WebSocket
- *
- * @param {String} url
- */
-
-function XHRPollingWS(url) {
-  var self = this;
-  self.url = toHttp(url);
-  self.poll();
-}
-
-XHRPollingWS.prototype.interval = 100;
-XHRPollingWS.prototype.send = xhrSend;
-handlers(XHRPollingWS.prototype);
-
-XHRPollingWS.prototype.close = function() {
-  var self = this;
-  self.readyState = CLOSED;
-  if (self.req) {
-    self.req.abort();
-    delete self.req;
-  }
-  clearTimeout(self.timeout);
-  self.onclose();
-  return self;
-};
-
-XHRPollingWS.prototype.poll = function() {
-  var self = this;
-  self.timeout = setTimeout(function() {
-    self._poll();
-  }, self.interval);
-  return self;
-};
-
-XHRPollingWS.prototype._poll = function() {
-  var self = this;
-
-  var opts = {
-    url: self.url,
-    headers: {
-      'cache-control': 'max-age=0',
-      'x-socket-transport': 'xhrPolling'
-    },
-    credentials: self.credentials
-  }
-
-  function success(req) {
-    delete self.req;
-    if (req.status === 0) return self.onerror();
-
-    if (self.readyState === CONNECTING) {
-      self.readyState = OPEN;
-      self.onopen();
-    }
-
-    var res = req.responseText;
-    if (res && res.length > 0) self.onmessage({data: res});
-
-    if (self.readyState === OPEN) self.poll();
-  }
-
-  self.req = xhr(opts, success, self.onerror);
-};
-
-/**
- * Send a message using ajax. Used for both EventSource and
- * xhrPolling transports.
- *
- * @param {String} data
- */
-
-function xhrSend(data) {
-  var self = this;
-  if (self.readyState !== CONNECTING && self.readyState !== OPEN) return self;
-
-  var opts = {
-    method: 'POST',
-    url: self.url,
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded; charset=utf-8',
-      'cache-control': 'max-age=0',
-      'x-socket-transport': 'xhrPolling'
-    },
-    data: data, // TODO do we encode this?
-    credentials: self.credentials
-  };
-
-  function success(req) {
-    var res = req.responseText;
-    if (res && res.length > 0) self.onmessage({data: res});
-  }
-
-  xhr(opts, success, self.onerror);
-  return self;
-}
 
 /**
  * Feature detection
@@ -291,29 +187,9 @@ var transports = {
   },
   eventsource: function() {
     if (!window.EventSource) return false;
-    return EventSourceWS;
+    return EventSource;
   },
   xhrpolling: function() {
-    return XHRPollingWS;
+    return XHRPolling;
   }
 };
-
-/**
- * Convert a ws url to http
- */
-
-function toHttp(url) {
-  return url.replace('ws:', 'http:').replace('wss:', 'https:');
-}
-
-/**
- * Mixin noop event functions
- */
-
-function handlers(proto) {
-  proto.readyState = CONNECTING;
-  proto.onopen = noop;
-  proto.onmessage = noop;
-  proto.onerror = noop;
-  proto.onclose = noop;
-}
