@@ -1,0 +1,16 @@
+{
+  "name": "bullet",
+  "repo": "camshaft/bullet.js",
+  "description": "jQuery-free version of bullet",
+  "version": "0.0.1",
+  "keywords": [],
+  "dependencies": {
+    "matthewp/xhr": "~0.0.1"
+  },
+  "development": {},
+  "license": "MIT",
+  "main": "index.js",
+  "scripts": [
+    "index.js"
+  ]
+}
