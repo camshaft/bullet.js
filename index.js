@@ -116,7 +116,7 @@ Bullet.prototype.init = function() {
   self.cursor = t.__cursor;
 
   t.onopen = function() {
-    if (t.heart) self.heartbeat = setInterval(function() {self.onheartbeat();}, 20000);
+    if (t.heart) t.heart = setInterval(function() {self.onheartbeat();}, 20000);
     if (self.readyState === status.OPEN) return;
     self.delay = DELAY_DEFAULT;
     self.readyState = status.OPEN;
@@ -126,9 +126,10 @@ Bullet.prototype.init = function() {
   t.onerror = t.onclose = function() {
     if (self.readyState === status.CLOSED || !t) return;
     var prev = t.__cursor;
+    clearInterval(t.heart);
+
     delete self.transport;
     t = null;
-    clearInterval(self.heartbeat);
 
     if (self.readyState === status.CLOSING) {
       self.readyState = status.CLOSED;
