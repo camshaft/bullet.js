@@ -48,13 +48,13 @@ XHRPolling.prototype._poll = function() {
   var self = this;
 
   var opts = {
-    url: self.url,
+    url: self.url + '?_=' + (+(new Date)),
     headers: {
       'cache-control': 'max-age=0',
       'x-socket-transport': 'xhrPolling'
     },
     credentials: self.credentials
-  }
+  };
 
   function success(req) {
     delete self.req;
