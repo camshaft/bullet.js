@@ -116,6 +116,7 @@ Bullet.prototype.init = function() {
   self.cursor = t.__cursor;
 
   t.onopen = function() {
+    if (!t) return;
     if (t.heart) t.heart = setInterval(function() {self.onheartbeat();}, 20000);
     if (self.readyState === status.OPEN) return;
     self.delay = DELAY_DEFAULT;
